@@ -1,0 +1,1042 @@
+// ============================================================================
+// referTRM Marketing OS - PostgreSQL Database Schema
+// A comprehensive schema for B2B CRM, B2C Platform, Marketplace & Marketing
+// For: Payroll outsourcing and recruitment services company in Myanmar
+// Clients: Makro Myanmar, JDE Myanmar
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS - Business Logic Constants
+// ============================================================================
+
+enum CompanySize {
+  STARTUP     // 1-10 employees
+  SMALL       // 11-50 employees
+  MEDIUM      // 51-200 employees
+  LARGE       // 201-1000 employees
+  ENTERPRISE  // 1000+ employees
+}
+
+enum CompanyStatus {
+  PROSPECT        // Initial lead
+  QUALIFIED       // Qualified lead
+  NEGOTIATION     // In sales discussion
+  ONBOARDING      // Signing/onboarding
+  ACTIVE          // Active client
+  CHURNED         // Lost client
+  REACTIVATION    // Win-back target
+}
+
+enum ServiceType {
+  PAYROLL_OUTSOURCING
+  RECRUITMENT
+  REFERTRM_PLATFORM
+  BUNDLED_SERVICES
+}
+
+enum ContactRole {
+  DECISION_MAKER
+  INFLUENCER
+  CHAMPION
+  END_USER
+  GATEKEEPER
+}
+
+enum ActivityType {
+  CALL
+  EMAIL
+  MEETING
+  DEMO
+  PROPOSAL
+  CONTRACT
+  FOLLOW_UP
+  NOTE
+}
+
+enum DealStage {
+  DISCOVERY
+  QUALIFICATION
+  PROPOSAL
+  NEGOTIATION
+  CLOSED_WON
+  CLOSED_LOST
+}
+
+enum CandidateStatus {
+  LEAD              // Just registered
+  ENROLLED          // In a cohort
+  IN_PROGRESS       // Taking courses
+  CERTIFIED         // Completed certification
+  PLACED            // Got a job
+  ALUMNI            // Active in community
+  INACTIVE          // Churned
+}
+
+enum CourseType {
+  SKILL_ASSESSMENT
+  SOFT_SKILLS
+  TECHNICAL
+  INDUSTRY_SPECIFIC
+  CERTIFICATION_PREP
+}
+
+enum CohortStatus {
+  UPCOMING
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum JobStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  FILLED
+  CLOSED
+  EXPIRED
+}
+
+enum ApplicationStatus {
+  SUBMITTED
+  SCREENING
+  SHORTLISTED
+  INTERVIEW
+  OFFER
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum ReferralStatus {
+  PENDING
+  VERIFIED
+  INTERVIEW
+  HIRED
+  REWARDED
+  EXPIRED
+  INVALID
+}
+
+enum ContentType {
+  CASE_STUDY
+  ALUMNI_STORY
+  BLOG_POST
+  SOCIAL_POST
+  EMAIL_CAMPAIGN
+  NEWSLETTER
+  VIDEO_SCRIPT
+  TESTIMONIAL
+}
+
+enum ContentStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum Platform {
+  LINKEDIN
+  FACEBOOK
+  INSTAGRAM
+  TWITTER
+  WEBSITE
+  EMAIL
+  VIBER      // Popular in Myanmar
+  TELEGRAM
+}
+
+// ============================================================================
+// B2B CRM MODULE - Companies, Contacts, Sales Activities
+// ============================================================================
+
+/// Company entity for B2B clients and prospects
+/// Tracks sales pipeline, platform adoption, and account health
+model Company {
+  id                  String          @id @default(cuid())
+  
+  // Basic Information
+  name                String
+  legalName           String?
+  industry            String
+  size                CompanySize
+  status              CompanyStatus   @default(PROSPECT)
+  
+  // Location (Myanmar-focused)
+  address             String?
+  township            String?         // Myanmar administrative division
+  city                String          @default("Yangon")
+  country             String          @default("Myanmar")
+  
+  // Contact Information
+  website             String?
+  phone               String?
+  email               String?
+  
+  // Business Metrics
+  employeeCount       Int?
+  annualRevenue       Decimal?        @db.Decimal(15, 2)
+  
+  // Sales Pipeline
+  services            ServiceType[]   // Services interested in
+  leadSource          String?         // How they found us
+  assignedSalesRep    String?         // Sales team member ID
+  
+  // Platform Adoption (referTRM specific)
+  platformTier        String?         // Free, Starter, Pro, Enterprise
+  platformOnboarded   Boolean         @default(false)
+  platformActiveUsers Int             @default(0)
+  monthlyActiveJobs   Int             @default(0)
+  
+  // Account Health Scoring (0-100)
+  healthScore         Int             @default(50)
+  engagementScore     Int             @default(0)
+  npsScore            Int?            // Net Promoter Score
+  lastEngagement      DateTime?
+  
+  // Contract Details
+  contractValue       Decimal?        @db.Decimal(15, 2)
+  contractStart       DateTime?
+  contractEnd         DateTime?
+  
+  // Timestamps
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  
+  // Relations
+  contacts            Contact[]
+  activities          SalesActivity[]
+  deals               Deal[]
+  jobs                Job[]
+  contentMentions     Content[]       @relation("CompanyMentions")
+  
+  @@index([status])
+  @@index([industry])
+  @@index([healthScore])
+  @@index([assignedSalesRep])
+  @@map("companies")
+}
+
+/// Contact person at a company
+/// Multiple contacts per company with different roles
+model Contact {
+  id              String        @id @default(cuid())
+  
+  // Personal Information
+  firstName       String
+  lastName        String
+  email           String
+  phone           String?
+  mobilePhone     String?       // Viber/WhatsApp number
+  
+  // Professional
+  jobTitle        String?
+  department      String?
+  role            ContactRole   @default(END_USER)
+  
+  // Communication Preferences
+  preferredChannel    Platform?
+  languagePreference  String    @default("en") // en, my (Myanmar)
+  
+  // Engagement
+  lastContactedAt     DateTime?
+  emailOptIn          Boolean   @default(true)
+  smsOptIn            Boolean   @default(false)
+  
+  // Timestamps
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  // Relations
+  companyId       String
+  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  activities      SalesActivity[]
+  
+  @@unique([email, companyId])
+  @@index([companyId])
+  @@index([role])
+  @@map("contacts")
+}
+
+/// Sales activities tracking
+/// Every interaction with a prospect/client
+model SalesActivity {
+  id              String        @id @default(cuid())
+  
+  // Activity Details
+  type            ActivityType
+  subject         String
+  description     String?       @db.Text
+  outcome         String?
+  
+  // Scheduling
+  scheduledAt     DateTime?
+  completedAt     DateTime?
+  duration        Int?          // Duration in minutes
+  
+  // Follow-up
+  followUpRequired    Boolean   @default(false)
+  followUpDate        DateTime?
+  followUpNotes       String?
+  
+  // Attribution
+  createdBy       String        // User ID who created
+  
+  // Timestamps
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  // Relations
+  companyId       String
+  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contactId       String?
+  contact         Contact?      @relation(fields: [contactId], references: [id])
+  dealId          String?
+  deal            Deal?         @relation(fields: [dealId], references: [id])
+  
+  @@index([companyId])
+  @@index([type])
+  @@index([scheduledAt])
+  @@index([createdBy])
+  @@map("sales_activities")
+}
+
+/// Sales deals/opportunities
+/// Tracks the sales pipeline from discovery to close
+model Deal {
+  id              String        @id @default(cuid())
+  
+  // Deal Information
+  name            String
+  description     String?       @db.Text
+  stage           DealStage     @default(DISCOVERY)
+  services        ServiceType[]
+  
+  // Financial
+  value           Decimal       @db.Decimal(15, 2)
+  currency        String        @default("MMK") // Myanmar Kyat
+  probability     Int           @default(10)    // Win probability %
+  
+  // Timeline
+  expectedCloseDate   DateTime?
+  actualCloseDate     DateTime?
+  
+  // Pipeline Analytics
+  daysInStage     Int           @default(0)
+  stageHistory    Json?         // Array of {stage, enteredAt, exitedAt}
+  
+  // Win/Loss Analysis
+  closeReason     String?
+  competitorLost  String?       // If lost, to whom
+  
+  // Attribution
+  ownerId         String        // Sales rep ID
+  
+  // Timestamps
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  // Relations
+  companyId       String
+  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  activities      SalesActivity[]
+  
+  @@index([companyId])
+  @@index([stage])
+  @@index([ownerId])
+  @@index([expectedCloseDate])
+  @@map("deals")
+}
+
+// ============================================================================
+// B2C PLATFORM MODULE - Candidates, Cohorts, Courses, Certification
+// ============================================================================
+
+/// Candidate/Job Seeker profile
+/// Central entity for the B2C platform users
+model Candidate {
+  id                  String          @id @default(cuid())
+  
+  // Authentication
+  email               String          @unique
+  phoneNumber         String?
+  passwordHash        String?         // For platform login
+  
+  // Personal Information
+  firstName           String
+  lastName            String
+  nrcNumber           String?         // Myanmar National Registration Card
+  dateOfBirth         DateTime?
+  gender              String?
+  
+  // Location
+  currentCity         String?
+  currentTownship     String?
+  willingToRelocate   Boolean         @default(false)
+  preferredLocations  String[]
+  
+  // Professional Profile
+  headline            String?
+  bio                 String?         @db.Text
+  yearsExperience     Int             @default(0)
+  currentSalary       Decimal?        @db.Decimal(15, 2)
+  expectedSalary      Decimal?        @db.Decimal(15, 2)
+  noticePeriod        Int?            // Days
+  
+  // Skills & Qualifications
+  skills              String[]
+  languages           String[]        @default(["Myanmar", "English"])
+  education           Json?           // Array of {degree, institution, year}
+  certifications      Json?           // Array of {name, issuer, date}
+  workHistory         Json?           // Array of {company, title, startDate, endDate}
+  
+  // Platform Status
+  status              CandidateStatus @default(LEAD)
+  profileCompletion   Int             @default(0)  // Percentage
+  isVerified          Boolean         @default(false)
+  verifiedAt          DateTime?
+  
+  // Engagement Metrics
+  lastActiveAt        DateTime?
+  loginCount          Int             @default(0)
+  profileViews        Int             @default(0)
+  
+  // Referral Program
+  referralCode        String          @unique @default(cuid())
+  referredById        String?         // Another candidate who referred them
+  
+  // Communication Preferences
+  emailNotifications  Boolean         @default(true)
+  smsNotifications    Boolean         @default(true)
+  viberNotifications  Boolean         @default(true)
+  
+  // Documents
+  resumeUrl           String?
+  profilePhotoUrl     String?
+  
+  // Timestamps
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  
+  // Relations
+  referredBy          Candidate?      @relation("CandidateReferrals", fields: [referredById], references: [id])
+  referrals           Candidate[]     @relation("CandidateReferrals")
+  cohortEnrollments   CohortEnrollment[]
+  courseProgress      CourseProgress[]
+  applications        Application[]
+  referralsMade       Referral[]      @relation("ReferrerCandidate")
+  referralsReceived   Referral[]      @relation("ReferredCandidate")
+  contentMentions     Content[]       @relation("CandidateMentions")
+  
+  @@index([status])
+  @@index([skills])
+  @@index([currentCity])
+  @@index([referralCode])
+  @@map("candidates")
+}
+
+/// Learning cohort - group of candidates learning together
+/// Time-bound programs for skill development
+model Cohort {
+  id              String          @id @default(cuid())
+  
+  // Cohort Details
+  name            String          // e.g., "Tech Sales Bootcamp - Jan 2024"
+  description     String?         @db.Text
+  code            String          @unique // e.g., "TSB-2024-01"
+  
+  // Schedule
+  startDate       DateTime
+  endDate         DateTime
+  status          CohortStatus    @default(UPCOMING)
+  
+  // Capacity
+  maxCapacity     Int
+  currentEnrollment Int           @default(0)
+  
+  // Curriculum
+  targetIndustry  String?         // Industry focus
+  targetRoles     String[]        // Job roles this prepares for
+  
+  // Metrics
+  completionRate  Float           @default(0)
+  placementRate   Float           @default(0)
+  avgSatisfaction Float           @default(0)
+  
+  // Timestamps
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  // Relations
+  courses         CohortCourse[]
+  enrollments     CohortEnrollment[]
+  
+  @@index([status])
+  @@index([startDate])
+  @@map("cohorts")
+}
+
+/// Course/Module in the learning platform
+model Course {
+  id              String          @id @default(cuid())
+  
+  // Course Details
+  title           String
+  slug            String          @unique
+  description     String?         @db.Text
+  type            CourseType
+  
+  // Content
+  thumbnailUrl    String?
+  duration        Int             // Estimated duration in minutes
+  modules         Json?           // Array of module definitions
+  
+  // Difficulty & Prerequisites
+  difficulty      Int             @default(1) // 1-5 scale
+  prerequisites   String[]        // Course IDs required before
+  
+  // Certification
+  hasCertificate  Boolean         @default(false)
+  passingScore    Int             @default(70)
+  
+  // Metrics
+  enrollmentCount Int             @default(0)
+  completionRate  Float           @default(0)
+  avgRating       Float           @default(0)
+  
+  // Status
+  isPublished     Boolean         @default(false)
+  publishedAt     DateTime?
+  
+  // Timestamps
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  // Relations
+  cohorts         CohortCourse[]
+  progress        CourseProgress[]
+  
+  @@index([type])
+  @@index([isPublished])
+  @@map("courses")
+}
+
+/// Junction table for Cohort-Course relationship
+model CohortCourse {
+  id              String          @id @default(cuid())
+  order           Int             @default(0)
+  isRequired      Boolean         @default(true)
+  
+  cohortId        String
+  cohort          Cohort          @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  courseId        String
+  course          Course          @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  
+  @@unique([cohortId, courseId])
+  @@map("cohort_courses")
+}
+
+/// Candidate enrollment in a cohort
+model CohortEnrollment {
+  id              String          @id @default(cuid())
+  
+  // Status
+  enrolledAt      DateTime        @default(now())
+  completedAt     DateTime?
+  droppedAt       DateTime?
+  dropReason      String?
+  
+  // Progress
+  progressPercent Float           @default(0)
+  coursesCompleted Int            @default(0)
+  
+  // Outcome
+  certificateUrl  String?
+  finalScore      Float?
+  
+  // Relations
+  candidateId     String
+  candidate       Candidate       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  cohortId        String
+  cohort          Cohort          @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  
+  @@unique([candidateId, cohortId])
+  @@index([candidateId])
+  @@index([cohortId])
+  @@map("cohort_enrollments")
+}
+
+/// Individual course progress tracking
+model CourseProgress {
+  id              String          @id @default(cuid())
+  
+  // Progress
+  startedAt       DateTime        @default(now())
+  completedAt     DateTime?
+  progressPercent Float           @default(0)
+  
+  // Module Progress
+  moduleProgress  Json?           // {moduleId: {completed: bool, score: int}}
+  lastModuleId    String?
+  
+  // Assessment
+  attemptCount    Int             @default(0)
+  bestScore       Float?
+  lastScore       Float?
+  
+  // Time Tracking
+  timeSpentMinutes Int            @default(0)
+  
+  // Relations
+  candidateId     String
+  candidate       Candidate       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  courseId        String
+  course          Course          @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  
+  @@unique([candidateId, courseId])
+  @@index([candidateId])
+  @@index([courseId])
+  @@map("course_progress")
+}
+
+// ============================================================================
+// MARKETPLACE MODULE - Jobs, Applications, Referrals, Rewards
+// ============================================================================
+
+/// Job posting from companies
+model Job {
+  id              String          @id @default(cuid())
+  
+  // Basic Info
+  title           String
+  slug            String          @unique
+  description     String          @db.Text
+  requirements    String?         @db.Text
+  benefits        String?         @db.Text
+  
+  // Classification
+  department      String?
+  jobType         String          // Full-time, Part-time, Contract
+  experienceLevel String          // Entry, Mid, Senior, Lead
+  
+  // Location
+  city            String          @default("Yangon")
+  township        String?
+  isRemote        Boolean         @default(false)
+  
+  // Compensation
+  salaryMin       Decimal?        @db.Decimal(15, 2)
+  salaryMax       Decimal?        @db.Decimal(15, 2)
+  salaryCurrency  String          @default("MMK")
+  salaryPeriod    String          @default("monthly")
+  showSalary      Boolean         @default(true)
+  
+  // Skills & Requirements
+  requiredSkills  String[]
+  preferredSkills String[]
+  educationLevel  String?
+  
+  // Referral Incentives
+  referralBonus   Decimal?        @db.Decimal(15, 2)
+  referralBonusCurrency String    @default("MMK")
+  
+  // Status & Dates
+  status          JobStatus       @default(DRAFT)
+  publishedAt     DateTime?
+  expiresAt       DateTime?
+  filledAt        DateTime?
+  
+  // Capacity
+  positions       Int             @default(1)
+  applicationCount Int            @default(0)
+  
+  // Metrics
+  viewCount       Int             @default(0)
+  applicationRate Float           @default(0)
+  
+  // Timestamps
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  // Relations
+  companyId       String
+  company         Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  applications    Application[]
+  referrals       Referral[]
+  
+  @@index([companyId])
+  @@index([status])
+  @@index([city])
+  @@index([requiredSkills])
+  @@index([publishedAt])
+  @@map("jobs")
+}
+
+/// Job application from a candidate
+model Application {
+  id              String            @id @default(cuid())
+  
+  // Status
+  status          ApplicationStatus @default(SUBMITTED)
+  statusHistory   Json?             // Array of {status, timestamp, note}
+  
+  // Application Details
+  coverLetter     String?           @db.Text
+  resumeUrl       String?
+  customAnswers   Json?             // Answers to custom questions
+  
+  // Screening
+  screeningScore  Float?            // AI-generated fit score
+  screeningNotes  String?           @db.Text
+  
+  // Interview
+  interviewStage  Int               @default(0)
+  interviewNotes  Json?             // Array of interview feedback
+  
+  // Offer
+  offerAmount     Decimal?          @db.Decimal(15, 2)
+  offerDate       DateTime?
+  responseDeadline DateTime?
+  
+  // Source Attribution
+  source          String?           // Where they found the job
+  referralId      String?           @unique
+  
+  // Timestamps
+  appliedAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  // Relations
+  candidateId     String
+  candidate       Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  jobId           String
+  job             Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  referral        Referral?         @relation(fields: [referralId], references: [id])
+  
+  @@unique([candidateId, jobId])
+  @@index([candidateId])
+  @@index([jobId])
+  @@index([status])
+  @@map("applications")
+}
+
+/// Referral tracking for the referral marketplace
+model Referral {
+  id              String          @id @default(cuid())
+  
+  // Referral Code
+  code            String          @unique @default(cuid())
+  
+  // Status
+  status          ReferralStatus  @default(PENDING)
+  statusHistory   Json?           // Array of {status, timestamp}
+  
+  // Verification
+  verifiedAt      DateTime?
+  verificationNote String?
+  
+  // Hiring Outcome
+  hiredAt         DateTime?
+  startDate       DateTime?
+  
+  // Reward Calculation
+  rewardAmount    Decimal?        @db.Decimal(15, 2)
+  rewardCurrency  String          @default("MMK")
+  rewardPaidAt    DateTime?
+  rewardNote      String?
+  
+  // Bonus Tiers (gamification)
+  bonusTier       Int             @default(0) // 0-3 based on referral success
+  bonusMultiplier Float           @default(1.0)
+  
+  // Time tracking for reward eligibility
+  retentionDays   Int?            // Days the hire stayed
+  minRetentionMet Boolean         @default(false)
+  
+  // Timestamps
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  expiresAt       DateTime?
+  
+  // Relations
+  referrerId      String          // Candidate who made the referral
+  referrer        Candidate       @relation("ReferrerCandidate", fields: [referrerId], references: [id])
+  referredId      String          // Candidate who was referred
+  referred        Candidate       @relation("ReferredCandidate", fields: [referredId], references: [id])
+  jobId           String
+  job             Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  application     Application?
+  
+  @@index([referrerId])
+  @@index([referredId])
+  @@index([jobId])
+  @@index([status])
+  @@index([code])
+  @@map("referrals")
+}
+
+/// Reward transaction ledger
+model RewardTransaction {
+  id              String          @id @default(cuid())
+  
+  // Transaction Details
+  type            String          // REFERRAL_BONUS, COURSE_COMPLETION, MILESTONE, etc.
+  amount          Decimal         @db.Decimal(15, 2)
+  currency        String          @default("MMK")
+  
+  // Status
+  status          String          @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  processedAt     DateTime?
+  
+  // Payment Details
+  paymentMethod   String?         // BANK_TRANSFER, MOBILE_MONEY, PLATFORM_CREDIT
+  paymentRef      String?
+  
+  // Description
+  description     String?
+  
+  // Source Reference
+  sourceType      String          // REFERRAL, COURSE, CHALLENGE, etc.
+  sourceId        String          // ID of the source entity
+  
+  // Candidate
+  candidateId     String
+  
+  // Timestamps
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@index([candidateId])
+  @@index([status])
+  @@index([sourceType, sourceId])
+  @@map("reward_transactions")
+}
+
+// ============================================================================
+// MARKETING MODULE - Content, Performance Metrics
+// ============================================================================
+
+/// Marketing content (case studies, alumni stories, posts)
+model Content {
+  id              String          @id @default(cuid())
+  
+  // Content Details
+  type            ContentType
+  title           String
+  slug            String          @unique
+  excerpt         String?         @db.Text
+  body            String          @db.Text
+  
+  // Media
+  featuredImage   String?
+  images          String[]
+  videoUrl        String?
+  
+  // SEO
+  metaTitle       String?
+  metaDescription String?
+  keywords        String[]
+  
+  // Publishing
+  status          ContentStatus   @default(DRAFT)
+  publishedAt     DateTime?
+  scheduledFor    DateTime?
+  
+  // Distribution
+  platforms       Platform[]      // Where to publish
+  platformPosts   Json?           // {platform: {postId, url, publishedAt}}
+  
+  // AI Generation Metadata
+  aiGenerated     Boolean         @default(false)
+  aiPrompt        String?         @db.Text
+  aiModel         String?
+  humanEdited     Boolean         @default(false)
+  
+  // Author
+  authorId        String?
+  authorName      String?
+  
+  // Timestamps
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  // Relations - Featured subjects
+  companyMentions Company[]       @relation("CompanyMentions")
+  candidateMentions Candidate[]   @relation("CandidateMentions")
+  metrics         ContentMetric[]
+  
+  @@index([type])
+  @@index([status])
+  @@index([publishedAt])
+  @@map("content")
+}
+
+/// Content performance metrics per platform
+model ContentMetric {
+  id              String          @id @default(cuid())
+  
+  // Platform
+  platform        Platform
+  postUrl         String?
+  
+  // Engagement Metrics
+  views           Int             @default(0)
+  impressions     Int             @default(0)
+  clicks          Int             @default(0)
+  likes           Int             @default(0)
+  shares          Int             @default(0)
+  comments        Int             @default(0)
+  saves           Int             @default(0)
+  
+  // Conversion Metrics
+  profileVisits   Int             @default(0)
+  websiteClicks   Int             @default(0)
+  signups         Int             @default(0)
+  applications    Int             @default(0)
+  
+  // Calculated Metrics
+  engagementRate  Float           @default(0)
+  clickThroughRate Float          @default(0)
+  conversionRate  Float           @default(0)
+  
+  // Audience
+  reachTotal      Int             @default(0)
+  reachOrganic    Int             @default(0)
+  reachPaid       Int             @default(0)
+  
+  // Cost (if paid)
+  adSpend         Decimal?        @db.Decimal(15, 2)
+  costPerClick    Decimal?        @db.Decimal(10, 4)
+  costPerConversion Decimal?      @db.Decimal(10, 4)
+  
+  // Snapshot timestamp
+  recordedAt      DateTime        @default(now())
+  
+  // Relations
+  contentId       String
+  content         Content         @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  
+  @@index([contentId])
+  @@index([platform])
+  @@index([recordedAt])
+  @@map("content_metrics")
+}
+
+/// Marketing campaign tracking
+model Campaign {
+  id              String          @id @default(cuid())
+  
+  // Campaign Details
+  name            String
+  description     String?         @db.Text
+  type            String          // AWARENESS, LEAD_GEN, CONVERSION, RETENTION
+  
+  // Targeting
+  targetAudience  String          // B2B, B2C, BOTH
+  targetSegments  Json?           // Audience segment definitions
+  
+  // Budget
+  budget          Decimal?        @db.Decimal(15, 2)
+  budgetSpent     Decimal         @default(0) @db.Decimal(15, 2)
+  currency        String          @default("MMK")
+  
+  // Timeline
+  startDate       DateTime
+  endDate         DateTime?
+  status          String          @default("DRAFT") // DRAFT, ACTIVE, PAUSED, COMPLETED
+  
+  // Goals
+  goalType        String?         // LEADS, SIGNUPS, HIRES, AWARENESS
+  goalTarget      Int?
+  goalAchieved    Int             @default(0)
+  
+  // Timestamps
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@index([status])
+  @@index([startDate])
+  @@map("campaigns")
+}
+
+// ============================================================================
+// ANALYTICS & AUDIT
+// ============================================================================
+
+/// Event tracking for analytics
+model AnalyticsEvent {
+  id              String          @id @default(cuid())
+  
+  // Event Details
+  eventType       String          // page_view, job_view, application_submit, etc.
+  eventCategory   String          // b2b, b2c, marketplace, content
+  eventAction     String
+  eventLabel      String?
+  eventValue      Float?
+  
+  // Entity References
+  entityType      String?         // candidate, company, job, content
+  entityId        String?
+  
+  // User Context
+  userId          String?
+  userType        String?         // candidate, company_user, admin
+  sessionId       String?
+  
+  // Request Context
+  ipAddress       String?
+  userAgent       String?
+  referrer        String?
+  
+  // Location
+  country         String?
+  city            String?
+  
+  // Timestamp
+  occurredAt      DateTime        @default(now())
+  
+  @@index([eventType])
+  @@index([eventCategory])
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([occurredAt])
+  @@map("analytics_events")
+}
+
+/// Audit log for compliance and debugging
+model AuditLog {
+  id              String          @id @default(cuid())
+  
+  // Action
+  action          String          // CREATE, UPDATE, DELETE, LOGIN, etc.
+  entityType      String
+  entityId        String
+  
+  // Changes
+  previousState   Json?
+  newState        Json?
+  changedFields   String[]
+  
+  // Actor
+  actorId         String
+  actorType       String          // user, system, api
+  actorIp         String?
+  
+  // Timestamp
+  occurredAt      DateTime        @default(now())
+  
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([occurredAt])
+  @@map("audit_logs")
+}

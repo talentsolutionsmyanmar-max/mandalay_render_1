@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: refertrm-marketing-os
+    env: node
+    plan: free
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: refertrm-db
+          property: connectionString
+
+databases:
+  - name: refertrm-db
+    plan: free
